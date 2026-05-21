@@ -8,15 +8,15 @@ Custom OpenShift must-gather image for troubleshooting ORAN O-Cloud Manager depl
 |---|---|
 | **Cluster** | ClusterVersion, Infrastructure, Nodes, ClusterOperators, Proxy |
 | **ORAN O2IMS** | ProvisioningRequests, ClusterInstances, ClusterTemplates, NodeAllocationRequests, AllocatedNodes, HardwareTemplates, HardwareProfiles |
-| **RHACM/MCE** | MultiClusterHub, MultiClusterEngine, ManagedClusters, ClusterDeployments, AgentClusterInstalls, InfraEnvs, Agents, ClusterImageSets, AgentServiceConfig, Provisioning, ManagedClusterAddOns |
-| **Hive** | ClusterDeployments, SelectorSyncSets, SyncSets, HiveConfigs |
+| **RHACM/MCE** | MultiClusterHub, MultiClusterEngine, ManagedClusters, ClusterDeployments, AgentClusterInstalls, InfraEnvs, Agents, ClusterImageSets, AgentServiceConfig, Provisioning, ClusterManagementAddOns, ManagedClusterAddOns |
+| **Hive** | SelectorSyncSets, SyncSets, HiveConfigs |
 | **Metal3/BMO** | BareMetalHosts, PreprovisioningImages, HostFirmwareSettings, HostFirmwareComponents, FirmwareSchemas, BMCEventSubscriptions |
-| **GitOps/ArgoCD** | ArgoCD instances, Applications, ApplicationSets, GitOpsClusters, Placements, PlacementDecisions, ManagedClusterSets |
+| **GitOps/ArgoCD** | ArgoCD instances, Applications, ApplicationSets, GitOpsClusters, Placements, PlacementDecisions, ManagedClusterSetBindings, ManagedClusterSets |
 | **Policies** | Policies, ClusterGroupUpgrades (TALM), ConfigurationPolicies |
 | **ProvisioningRequests** | Per-PR: ProvisioningRequest, ClusterInstance, ClusterDeployment, AgentClusterInstall, InfraEnv, Agents, BMH, NMStateConfigs, NodeAllocationRequests, ManagedCluster, Policies |
 | **CRDs** | Relevant CRD definitions for all collected resource types |
 
-For each namespace: pods (with current and previous logs, last 5000 lines), configmaps, secrets, services, endpoints, routes, deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs, and events.
+For each namespace: pods (with current and previous logs, last 5000 lines, including init containers), configmaps, secrets, services, endpoints, routes, deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs, and events.
 
 ### Namespaces collected
 
@@ -54,7 +54,7 @@ oc adm must-gather --image=quay.io/bzhai/oran-must-gather:latest \
 
 # Collect only specific ProvisioningRequests
 oc adm must-gather --image=quay.io/bzhai/oran-must-gather:latest \
-  -- PROVISIONING_REQUESTS=pr-sno171,pr-sno146 /usr/bin/gather
+  -- /bin/bash -c 'PROVISIONING_REQUESTS=pr-sno171,pr-sno146 /usr/bin/gather'
 ```
 
 By default, all ProvisioningRequests are auto-discovered and collected along with their associated cluster resources. Set `PROVISIONING_REQUESTS` to limit collection to specific ProvisioningRequests (comma-separated names).
@@ -70,7 +70,7 @@ must-gather/
 ├── metal3/                  # Metal3/BMO CRs (all namespaces)
 ├── gitops/                  # ArgoCD, Applications, Placements
 ├── policies/                # Policies, TALM CGUs
-├── assisted-service/        # AgentServiceConfig
+├── assisted-service/        # Assisted-installer namespace resources
 ├── provisioning-requests/   # Per-ProvisioningRequest CRs and associated cluster resources
 │   └── <pr-name>/
 │       ├── provisioningrequest.yaml
@@ -78,9 +78,13 @@ must-gather/
 │       ├── clusterinstance.yaml
 │       ├── clusterdeployment.yaml
 │       ├── agentclusterinstall.yaml
+│       ├── infraenv.yaml
+│       ├── agents.yaml
 │       ├── baremetalhosts.yaml
-│       ├── policies.yaml
-│       └── ...
+│       ├── nmstateconfigs.yaml
+│       ├── managedcluster.yaml
+│       ├── nodeallocationrequests.yaml
+│       └── policies.yaml
 ├── crds/                    # Relevant CRD definitions
 └── namespaces/              # Per-namespace resources
     ├── oran-ocloud/
@@ -88,6 +92,7 @@ must-gather/
     ├── oran-ocloud-inventory-sub/
     ├── oran-ocloud-policies-sub/
     ├── open-cluster-management/
+    ├── open-cluster-management-hub/
     ├── multicluster-engine/
     ├── hive/
     ├── openshift-machine-api/
@@ -102,6 +107,15 @@ must-gather/
         │   └── <pod>_<container>_previous.log
         ├── configmaps.yaml
         ├── secrets.yaml
+        ├── services.yaml
+        ├── endpoints.yaml
+        ├── deployments.yaml
+        ├── statefulsets.yaml
+        ├── daemonsets.yaml
+        ├── replicasets.yaml
+        ├── jobs.yaml
+        ├── cronjobs.yaml
+        ├── routes.yaml
         ├── events.txt
         └── all-resources.txt
 ```

@@ -4,4 +4,4 @@ COPY collection-scripts/ /usr/bin/
 
 RUN chmod +x /usr/bin/gather
 
-ENTRYPOINT /usr/bin/gather
+ENTRYPOINT ["/usr/bin/gather"]
