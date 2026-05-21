@@ -1,0 +1,323 @@
+#!/bin/bash
+
+# ORAN O-Cloud Must-Gather
+# Collects diagnostic data for ORAN O2IMS, ACM/MCE, and spoke clusters
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+BASE_COLLECTION_PATH="${BASE_COLLECTION_PATH:-/must-gather}"
+SPOKE_CLUSTERS="${SPOKE_CLUSTERS:-}"
+mkdir -p "${BASE_COLLECTION_PATH}"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+collect_resource() {
+    local resource="$1"
+    local out_file="$2"
+    local flags="${3:--A}"
+    oc get "${resource}" ${flags} -o yaml > "${out_file}" 2>/dev/null || true
+}
+
+collect_resource_wide() {
+    local resource="$1"
+    local out_file="$2"
+    local flags="${3:--A}"
+    oc get "${resource}" ${flags} -o wide > "${out_file}" 2>/dev/null || true
+}
+
+collect_ns_resources() {
+    local ns="$1"
+    local out_dir="${BASE_COLLECTION_PATH}/namespaces/${ns}"
+
+    if ! oc get namespace "${ns}" &>/dev/null; then
+        log "Namespace ${ns} not found, skipping"
+        return 0
+    fi
+
+    log "Collecting resources from namespace: ${ns}"
+    mkdir -p "${out_dir}/pod-logs"
+
+    oc get pods -n "${ns}" -o yaml > "${out_dir}/pods.yaml" 2>/dev/null || true
+
+    for pod in $(oc get pods -n "${ns}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+        for container in $(oc get pod "${pod}" -n "${ns}" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null); do
+            oc logs "${pod}" -n "${ns}" -c "${container}" --tail=5000 > "${out_dir}/pod-logs/${pod}_${container}.log" 2>/dev/null || true
+            oc logs "${pod}" -n "${ns}" -c "${container}" --tail=5000 --previous > "${out_dir}/pod-logs/${pod}_${container}_previous.log" 2>/dev/null || true
+        done
+    done
+
+    for resource in configmaps secrets services endpoints deployments statefulsets daemonsets replicasets jobs cronjobs routes; do
+        oc get "${resource}" -n "${ns}" -o yaml > "${out_dir}/${resource}.yaml" 2>/dev/null || true
+    done
+
+    oc get events -n "${ns}" --sort-by='.lastTimestamp' > "${out_dir}/events.txt" 2>/dev/null || true
+    oc get all -n "${ns}" -o wide > "${out_dir}/all-resources.txt" 2>/dev/null || true
+}
+
+collect_cluster_resources() {
+    local out_dir="${BASE_COLLECTION_PATH}/cluster-scoped"
+    mkdir -p "${out_dir}"
+
+    log "Collecting cluster-scoped resources"
+
+    oc get clusterversion -o yaml > "${out_dir}/clusterversion.yaml" 2>/dev/null || true
+    oc get infrastructure cluster -o yaml > "${out_dir}/infrastructure.yaml" 2>/dev/null || true
+    oc get nodes -o yaml > "${out_dir}/nodes.yaml" 2>/dev/null || true
+    oc get nodes -o wide > "${out_dir}/nodes.txt" 2>/dev/null || true
+    oc get clusteroperators -o yaml > "${out_dir}/clusteroperators.yaml" 2>/dev/null || true
+    oc get clusteroperators > "${out_dir}/clusteroperators.txt" 2>/dev/null || true
+    oc get proxy cluster -o yaml > "${out_dir}/proxy.yaml" 2>/dev/null || true
+}
+
+collect_oran() {
+    local out_dir="${BASE_COLLECTION_PATH}/oran"
+    mkdir -p "${out_dir}"
+
+    log "Collecting ORAN O2IMS resources"
+
+    # ProvisioningRequests
+    collect_resource provisioningrequests "${out_dir}/provisioningrequests.yaml"
+    collect_resource_wide provisioningrequests "${out_dir}/provisioningrequests.txt"
+
+    # ClusterInstances
+    collect_resource clusterinstances "${out_dir}/clusterinstances.yaml"
+    collect_resource_wide clusterinstances "${out_dir}/clusterinstances.txt"
+
+    # ClusterTemplates
+    collect_resource clustertemplates "${out_dir}/clustertemplates.yaml"
+    collect_resource_wide clustertemplates "${out_dir}/clustertemplates.txt"
+
+    # NodeAllocationRequests
+    collect_resource nodeallocationrequests "${out_dir}/nodeallocationrequests.yaml"
+    collect_resource_wide nodeallocationrequests "${out_dir}/nodeallocationrequests.txt"
+
+    # AllocatedNodes
+    collect_resource allocatednodes "${out_dir}/allocatednodes.yaml"
+    collect_resource_wide allocatednodes "${out_dir}/allocatednodes.txt"
+
+    # HardwareTemplates
+    collect_resource hardwaretemplates "${out_dir}/hardwaretemplates.yaml"
+    collect_resource_wide hardwaretemplates "${out_dir}/hardwaretemplates.txt"
+
+    # HardwareProfiles
+    collect_resource hardwareprofiles "${out_dir}/hardwareprofiles.yaml"
+    collect_resource_wide hardwareprofiles "${out_dir}/hardwareprofiles.txt"
+
+    # ORAN namespaces (auto-discover oran-* namespaces)
+    local oran_namespaces
+    oran_namespaces=$(oc get ns -o name 2>/dev/null | grep "/oran-" | sed 's|namespace/||' || echo "")
+    for ns in ${oran_namespaces}; do
+        collect_ns_resources "${ns}"
+    done
+}
+
+collect_acm_mce() {
+    local out_dir="${BASE_COLLECTION_PATH}/acm-mce"
+    mkdir -p "${out_dir}"
+
+    log "Collecting RHACM/MCE resources"
+
+    collect_resource multiclusterhub "${out_dir}/multiclusterhub.yaml"
+    collect_resource multiclusterengine "${out_dir}/multiclusterengine.yaml" ""
+    collect_resource managedclusters "${out_dir}/managedclusters.yaml" ""
+    collect_resource_wide managedclusters "${out_dir}/managedclusters.txt" ""
+    collect_resource clusterdeployments "${out_dir}/clusterdeployments.yaml"
+    collect_resource agentclusterinstalls "${out_dir}/agentclusterinstalls.yaml"
+    collect_resource infraenvs "${out_dir}/infraenvs.yaml"
+    collect_resource agents "${out_dir}/agents.yaml"
+    collect_resource_wide agents "${out_dir}/agents.txt"
+    collect_resource clusterimagesets "${out_dir}/clusterimagesets.yaml" ""
+    collect_resource agentserviceconfig "${out_dir}/agentserviceconfig.yaml" ""
+    collect_resource provisioning "${out_dir}/provisioning.yaml" ""
+    collect_resource clustermanagementaddons "${out_dir}/clustermanagementaddons.yaml" ""
+    collect_resource managedclusteraddons "${out_dir}/managedclusteraddons.yaml"
+
+    for ns in open-cluster-management open-cluster-management-hub multicluster-engine; do
+        collect_ns_resources "${ns}"
+    done
+}
+
+collect_hive() {
+    local out_dir="${BASE_COLLECTION_PATH}/hive"
+    mkdir -p "${out_dir}"
+
+    log "Collecting Hive resources"
+
+    collect_resource clusterdeployments "${out_dir}/clusterdeployments.yaml"
+    collect_resource selectorsyncsets "${out_dir}/selectorsyncsets.yaml"
+    collect_resource syncsets "${out_dir}/syncsets.yaml"
+    collect_resource hiveconfigs "${out_dir}/hiveconfigs.yaml" ""
+
+    collect_ns_resources "hive"
+}
+
+collect_metal3() {
+    local out_dir="${BASE_COLLECTION_PATH}/metal3"
+    mkdir -p "${out_dir}"
+
+    log "Collecting Metal3/Baremetal operator resources"
+
+    collect_resource baremetalhosts "${out_dir}/baremetalhosts.yaml"
+    collect_resource_wide baremetalhosts "${out_dir}/baremetalhosts.txt"
+    collect_resource preprovisioningimages "${out_dir}/preprovisioningimages.yaml"
+    collect_resource hostfirmwaresettings "${out_dir}/hostfirmwaresettings.yaml"
+    collect_resource hostfirmwarecomponents "${out_dir}/hostfirmwarecomponents.yaml"
+    collect_resource firmwareschemas "${out_dir}/firmwareschemas.yaml"
+    collect_resource bmceventsubscriptions "${out_dir}/bmceventsubscriptions.yaml"
+
+    collect_ns_resources "openshift-machine-api"
+
+    # Auto-discover BMH pool namespaces
+    local bmh_namespaces
+    bmh_namespaces=$(oc get baremetalhosts -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | sort -u || echo "")
+    for ns in ${bmh_namespaces}; do
+        [[ "${ns}" == "openshift-machine-api" ]] && continue
+        collect_ns_resources "${ns}"
+        oc get baremetalhosts -n "${ns}" -o yaml > "${BASE_COLLECTION_PATH}/namespaces/${ns}/baremetalhosts.yaml" 2>/dev/null || true
+    done
+}
+
+collect_gitops() {
+    local out_dir="${BASE_COLLECTION_PATH}/gitops"
+    mkdir -p "${out_dir}"
+
+    log "Collecting GitOps/ArgoCD resources"
+
+    collect_resource argocds "${out_dir}/argocds.yaml"
+    collect_resource applications.argoproj.io "${out_dir}/applications.yaml"
+    collect_resource_wide applications.argoproj.io "${out_dir}/applications.txt"
+    collect_resource applicationsets.argoproj.io "${out_dir}/applicationsets.yaml"
+    collect_resource gitopsclusters "${out_dir}/gitopsclusters.yaml"
+    collect_resource placements "${out_dir}/placements.yaml"
+    collect_resource placementdecisions "${out_dir}/placementdecisions.yaml"
+    collect_resource managedclustersetbindings "${out_dir}/managedclustersetbindings.yaml"
+    collect_resource managedclustersets "${out_dir}/managedclustersets.yaml" ""
+
+    collect_ns_resources "openshift-gitops"
+}
+
+collect_policies() {
+    local out_dir="${BASE_COLLECTION_PATH}/policies"
+    mkdir -p "${out_dir}"
+
+    log "Collecting policy resources"
+
+    collect_resource policies.policy.open-cluster-management.io "${out_dir}/policies.yaml"
+    oc get policies.policy.open-cluster-management.io -A > "${out_dir}/policies.txt" 2>/dev/null || true
+    collect_resource clustergroupupgrades "${out_dir}/clustergroupupgrades.yaml"
+    oc get clustergroupupgrades -A > "${out_dir}/clustergroupupgrades.txt" 2>/dev/null || true
+    collect_resource configurationpolicies "${out_dir}/configurationpolicies.yaml"
+
+    # Auto-discover ztp-* namespaces
+    local ztp_namespaces
+    ztp_namespaces=$(oc get ns -o name 2>/dev/null | grep "/ztp-" | sed 's|namespace/||' || echo "")
+    for ns in ${ztp_namespaces}; do
+        collect_ns_resources "${ns}"
+    done
+}
+
+collect_spoke_clusters() {
+    local out_dir="${BASE_COLLECTION_PATH}/spoke-clusters"
+    mkdir -p "${out_dir}"
+
+    log "Collecting spoke cluster resources"
+
+    local spoke_namespaces
+
+    if [[ -n "${SPOKE_CLUSTERS}" ]]; then
+        spoke_namespaces="${SPOKE_CLUSTERS//,/ }"
+        log "Using specified spoke clusters: ${spoke_namespaces}"
+    else
+        spoke_namespaces=$(oc get managedclusters -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+        if [[ -z "${spoke_namespaces}" ]]; then
+            spoke_namespaces=$(oc get clusterdeployments -A -o jsonpath='{.items[*].metadata.namespace}' 2>/dev/null || echo "")
+        fi
+    fi
+
+    for cluster_ns in ${spoke_namespaces}; do
+        [[ "${cluster_ns}" == "local-cluster" ]] && continue
+
+        log "Collecting spoke cluster: ${cluster_ns}"
+        local cluster_dir="${out_dir}/${cluster_ns}"
+        mkdir -p "${cluster_dir}"
+
+        collect_ns_resources "${cluster_ns}"
+
+        oc get clusterdeployment -n "${cluster_ns}" -o yaml > "${cluster_dir}/clusterdeployment.yaml" 2>/dev/null || true
+        oc get agentclusterinstall -n "${cluster_ns}" -o yaml > "${cluster_dir}/agentclusterinstall.yaml" 2>/dev/null || true
+        oc get infraenv -n "${cluster_ns}" -o yaml > "${cluster_dir}/infraenv.yaml" 2>/dev/null || true
+        oc get agents -n "${cluster_ns}" -o yaml > "${cluster_dir}/agents.yaml" 2>/dev/null || true
+        oc get baremetalhosts -n "${cluster_ns}" -o yaml > "${cluster_dir}/baremetalhosts.yaml" 2>/dev/null || true
+        oc get nmstateconfigs -n "${cluster_ns}" -o yaml > "${cluster_dir}/nmstateconfigs.yaml" 2>/dev/null || true
+        oc get managedcluster "${cluster_ns}" -o yaml > "${cluster_dir}/managedcluster.yaml" 2>/dev/null || true
+        oc get policies.policy.open-cluster-management.io -n "${cluster_ns}" -o yaml > "${cluster_dir}/policies.yaml" 2>/dev/null || true
+
+        # ORAN-specific per-cluster resources
+        oc get clusterinstance -n "${cluster_ns}" -o yaml > "${cluster_dir}/clusterinstance.yaml" 2>/dev/null || true
+        oc get nodeallocationrequests -n "${cluster_ns}" -o yaml > "${cluster_dir}/nodeallocationrequests.yaml" 2>/dev/null || true
+    done
+}
+
+collect_assisted_service() {
+    local out_dir="${BASE_COLLECTION_PATH}/assisted-service"
+    mkdir -p "${out_dir}"
+
+    log "Collecting assisted-service resources"
+
+    collect_resource agentserviceconfig "${out_dir}/agentserviceconfig.yaml" ""
+    collect_ns_resources "assisted-installer"
+}
+
+collect_crds() {
+    local out_dir="${BASE_COLLECTION_PATH}/crds"
+    mkdir -p "${out_dir}"
+
+    log "Collecting relevant CRDs"
+
+    local crd_patterns=(
+        "provisioningrequests" "clusterinstances" "clustertemplates"
+        "nodeallocationrequests" "allocatednodes"
+        "hardwaretemplates" "hardwareprofiles"
+        "agentclusterinstalls" "agents.agent-install" "infraenvs"
+        "baremetalhosts" "clusterdeployments" "managedclusters"
+        "policies.policy" "clustergroupupgrades"
+        "nmstateconfigs" "agentserviceconfig" "clusterimagesets"
+        "hostfirmwaresettings" "hostfirmwarecomponents" "firmwareschemas"
+        "preprovisioningimages" "bmceventsubscriptions"
+    )
+
+    for pattern in "${crd_patterns[@]}"; do
+        for crd in $(oc get crds -o name 2>/dev/null | grep "${pattern}" || true); do
+            local crd_name
+            crd_name=$(basename "${crd}")
+            oc get "${crd}" -o yaml > "${out_dir}/${crd_name}.yaml" 2>/dev/null || true
+        done
+    done
+}
+
+# ---- Main ----
+log "Starting ORAN O-Cloud must-gather collection"
+log "Output directory: ${BASE_COLLECTION_PATH}"
+
+collect_cluster_resources
+collect_oran
+collect_acm_mce
+collect_hive
+collect_metal3
+collect_gitops
+collect_policies
+collect_spoke_clusters
+collect_assisted_service
+collect_crds
+
+# Summary
+log "Collection complete. Contents:"
+find "${BASE_COLLECTION_PATH}" -type f | wc -l | xargs -I{} echo "  Total files collected: {}"
+du -sh "${BASE_COLLECTION_PATH}" | awk '{print "  Total size: " $1}'
+
+log "ORAN O-Cloud must-gather finished successfully"
+exit 0
