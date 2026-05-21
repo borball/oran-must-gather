@@ -8,7 +8,7 @@ set -o nounset
 set -o pipefail
 
 BASE_COLLECTION_PATH="${BASE_COLLECTION_PATH:-/must-gather}"
-SPOKE_CLUSTERS="${SPOKE_CLUSTERS:-}"
+PROVISIONING_REQUESTS="${PROVISIONING_REQUESTS:-}"
 mkdir -p "${BASE_COLLECTION_PATH}"
 
 log() {
@@ -220,45 +220,52 @@ collect_policies() {
     done
 }
 
-collect_spoke_clusters() {
-    local out_dir="${BASE_COLLECTION_PATH}/spoke-clusters"
+collect_provisioning_requests() {
+    local out_dir="${BASE_COLLECTION_PATH}/provisioning-requests"
     mkdir -p "${out_dir}"
 
-    log "Collecting spoke cluster resources"
+    log "Collecting ProvisioningRequest resources"
 
-    local spoke_namespaces
+    local pr_names
 
-    if [[ -n "${SPOKE_CLUSTERS}" ]]; then
-        spoke_namespaces="${SPOKE_CLUSTERS//,/ }"
-        log "Using specified spoke clusters: ${spoke_namespaces}"
+    if [[ -n "${PROVISIONING_REQUESTS}" ]]; then
+        pr_names="${PROVISIONING_REQUESTS//,/ }"
+        log "Using specified ProvisioningRequests: ${pr_names}"
     else
-        spoke_namespaces=$(oc get managedclusters -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
-        if [[ -z "${spoke_namespaces}" ]]; then
-            spoke_namespaces=$(oc get clusterdeployments -A -o jsonpath='{.items[*].metadata.namespace}' 2>/dev/null || echo "")
-        fi
+        pr_names=$(oc get provisioningrequests -A -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+        log "Auto-discovered ProvisioningRequests: ${pr_names}"
     fi
 
-    for cluster_ns in ${spoke_namespaces}; do
-        [[ "${cluster_ns}" == "local-cluster" ]] && continue
+    for pr_name in ${pr_names}; do
+        log "Collecting ProvisioningRequest: ${pr_name}"
+        local pr_dir="${out_dir}/${pr_name}"
+        mkdir -p "${pr_dir}"
 
-        log "Collecting spoke cluster: ${cluster_ns}"
-        local cluster_dir="${out_dir}/${cluster_ns}"
-        mkdir -p "${cluster_dir}"
+        oc get provisioningrequest "${pr_name}" -o yaml > "${pr_dir}/provisioningrequest.yaml" 2>/dev/null || true
 
-        collect_ns_resources "${cluster_ns}"
+        local cluster_name
+        cluster_name=$(oc get provisioningrequest "${pr_name}" -o jsonpath='{.spec.templateParameters.nodeClusterName}' 2>/dev/null || echo "")
 
-        oc get clusterdeployment -n "${cluster_ns}" -o yaml > "${cluster_dir}/clusterdeployment.yaml" 2>/dev/null || true
-        oc get agentclusterinstall -n "${cluster_ns}" -o yaml > "${cluster_dir}/agentclusterinstall.yaml" 2>/dev/null || true
-        oc get infraenv -n "${cluster_ns}" -o yaml > "${cluster_dir}/infraenv.yaml" 2>/dev/null || true
-        oc get agents -n "${cluster_ns}" -o yaml > "${cluster_dir}/agents.yaml" 2>/dev/null || true
-        oc get baremetalhosts -n "${cluster_ns}" -o yaml > "${cluster_dir}/baremetalhosts.yaml" 2>/dev/null || true
-        oc get nmstateconfigs -n "${cluster_ns}" -o yaml > "${cluster_dir}/nmstateconfigs.yaml" 2>/dev/null || true
-        oc get managedcluster "${cluster_ns}" -o yaml > "${cluster_dir}/managedcluster.yaml" 2>/dev/null || true
-        oc get policies.policy.open-cluster-management.io -n "${cluster_ns}" -o yaml > "${cluster_dir}/policies.yaml" 2>/dev/null || true
+        if [[ -z "${cluster_name}" ]]; then
+            log "  Could not resolve cluster name for PR ${pr_name}, skipping cluster resources"
+            continue
+        fi
 
-        # ORAN-specific per-cluster resources
-        oc get clusterinstance -n "${cluster_ns}" -o yaml > "${cluster_dir}/clusterinstance.yaml" 2>/dev/null || true
-        oc get nodeallocationrequests -n "${cluster_ns}" -o yaml > "${cluster_dir}/nodeallocationrequests.yaml" 2>/dev/null || true
+        log "  PR ${pr_name} -> cluster ${cluster_name}"
+        echo "${cluster_name}" > "${pr_dir}/cluster-name.txt"
+
+        collect_ns_resources "${cluster_name}"
+
+        oc get clusterinstance -n "${cluster_name}" -o yaml > "${pr_dir}/clusterinstance.yaml" 2>/dev/null || true
+        oc get clusterdeployment -n "${cluster_name}" -o yaml > "${pr_dir}/clusterdeployment.yaml" 2>/dev/null || true
+        oc get agentclusterinstall -n "${cluster_name}" -o yaml > "${pr_dir}/agentclusterinstall.yaml" 2>/dev/null || true
+        oc get infraenv -n "${cluster_name}" -o yaml > "${pr_dir}/infraenv.yaml" 2>/dev/null || true
+        oc get agents -n "${cluster_name}" -o yaml > "${pr_dir}/agents.yaml" 2>/dev/null || true
+        oc get baremetalhosts -n "${cluster_name}" -o yaml > "${pr_dir}/baremetalhosts.yaml" 2>/dev/null || true
+        oc get nmstateconfigs -n "${cluster_name}" -o yaml > "${pr_dir}/nmstateconfigs.yaml" 2>/dev/null || true
+        oc get managedcluster "${cluster_name}" -o yaml > "${pr_dir}/managedcluster.yaml" 2>/dev/null || true
+        oc get policies.policy.open-cluster-management.io -n "${cluster_name}" -o yaml > "${pr_dir}/policies.yaml" 2>/dev/null || true
+        oc get nodeallocationrequests -n "${cluster_name}" -o yaml > "${pr_dir}/nodeallocationrequests.yaml" 2>/dev/null || true
     done
 }
 
@@ -310,7 +317,7 @@ collect_hive
 collect_metal3
 collect_gitops
 collect_policies
-collect_spoke_clusters
+collect_provisioning_requests
 collect_assisted_service
 collect_crds
 
