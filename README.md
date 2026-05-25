@@ -54,10 +54,10 @@ oc adm must-gather --image=quay.io/bzhai/oran-must-gather:latest \
 
 # Collect only specific ProvisioningRequests
 oc adm must-gather --image=quay.io/bzhai/oran-must-gather:latest \
-  -- /bin/bash -c 'PROVISIONING_REQUESTS=pr-sno171,pr-sno146 /usr/bin/gather'
+  -- /usr/bin/gather --provisioning-requests=pr-sno171,pr-sno146
 ```
 
-By default, all ProvisioningRequests are auto-discovered and collected along with their associated cluster resources. Set `PROVISIONING_REQUESTS` to limit collection to specific ProvisioningRequests (comma-separated names).
+By default, all ProvisioningRequests are auto-discovered and collected along with their associated cluster resources. Use `--provisioning-requests` to limit collection to specific ProvisioningRequests (comma-separated names).
 
 ## Output structure
 

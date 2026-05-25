@@ -7,8 +7,19 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-BASE_COLLECTION_PATH="${BASE_COLLECTION_PATH:-/must-gather}"
 PROVISIONING_REQUESTS="${PROVISIONING_REQUESTS:-}"
+BASE_COLLECTION_PATH=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --provisioning-requests=*) PROVISIONING_REQUESTS="${1#*=}"; shift ;;
+        --provisioning-requests) PROVISIONING_REQUESTS="${2:-}"; shift 2 ;;
+        -*) shift ;;
+        *) BASE_COLLECTION_PATH="$1"; shift ;;
+    esac
+done
+
+BASE_COLLECTION_PATH="${BASE_COLLECTION_PATH:-/must-gather}"
 mkdir -p "${BASE_COLLECTION_PATH}"
 
 log() {
