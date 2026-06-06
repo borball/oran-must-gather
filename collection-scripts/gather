@@ -284,6 +284,32 @@ collect_provisioning_requests() {
     done
 }
 
+collect_o_cloud_manager() {
+    local out_dir="${BASE_COLLECTION_PATH}/o-cloud-manager"
+    mkdir -p "${out_dir}"
+
+    log "Collecting O-Cloud Manager resources"
+
+    local operator_ns
+    operator_ns=$(oc get subscriptions.operators.coreos.com -A \
+        -o jsonpath='{range .items[?(@.spec.name=="o-cloud-manager")]}{.metadata.namespace}{end}' \
+        2>/dev/null || echo "")
+
+    if [[ -z "${operator_ns}" ]]; then
+        log "o-cloud-manager subscription not found, skipping"
+        return 0
+    fi
+
+    log "Found o-cloud-manager operator in namespace: ${operator_ns}"
+    collect_ns_resources "${operator_ns}"
+
+    collect_resource inventories.ocloud.openshift.io "${out_dir}/inventories.yaml"
+    collect_resource locations.ocloud.openshift.io "${out_dir}/locations.yaml"
+    collect_resource ocloudsites.ocloud.openshift.io "${out_dir}/ocloudsites.yaml"
+    collect_resource resourcepools.ocloud.openshift.io "${out_dir}/resourcepools.yaml"
+    collect_resource hardwareplugins.clcm.openshift.io "${out_dir}/hardwareplugins.yaml"
+}
+
 collect_assisted_service() {
     local out_dir="${BASE_COLLECTION_PATH}/assisted-service"
     mkdir -p "${out_dir}"
@@ -309,6 +335,8 @@ collect_crds() {
         "nmstateconfigs" "agentserviceconfig" "clusterimagesets"
         "hostfirmwaresettings" "hostfirmwarecomponents" "firmwareschemas"
         "preprovisioningimages" "bmceventsubscriptions"
+        "inventories.ocloud" "locations.ocloud" "ocloudsites"
+        "resourcepools.ocloud" "hardwareplugins.clcm"
     )
 
     for pattern in "${crd_patterns[@]}"; do
@@ -327,6 +355,7 @@ log "Output directory: ${BASE_COLLECTION_PATH}"
 
 collect_cluster_resources
 collect_oran
+collect_o_cloud_manager
 collect_acm_mce
 collect_hive
 collect_metal3
