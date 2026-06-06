@@ -119,6 +119,13 @@ collect_oran() {
     collect_resource hardwareprofiles "${out_dir}/hardwareprofiles.yaml"
     collect_resource_wide hardwareprofiles "${out_dir}/hardwareprofiles.txt"
 
+    # Collect ClusterTemplate namespaces and their associated ConfigMaps
+    local ct_namespaces
+    ct_namespaces=$(oc get clustertemplates -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | sort -u || echo "")
+    for ns in ${ct_namespaces}; do
+        collect_ns_resources "${ns}"
+    done
+
     # ORAN namespaces (auto-discover oran-* namespaces)
     local oran_namespaces
     oran_namespaces=$(oc get ns -o name 2>/dev/null | grep "/oran-" | sed 's|namespace/||' || echo "")
