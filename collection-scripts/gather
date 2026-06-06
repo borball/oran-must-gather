@@ -182,11 +182,15 @@ collect_metal3() {
 
     collect_ns_resources "openshift-machine-api"
 
-    # Auto-discover BMH pool namespaces
+    # Collect BMH pool namespaces, skip spoke cluster namespaces
+    # (spoke cluster BMHs are collected by collect_provisioning_requests)
     local bmh_namespaces
     bmh_namespaces=$(oc get baremetalhosts -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | sort -u || echo "")
+    local managed_clusters
+    managed_clusters=" $(oc get managedclusters -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "") "
     for ns in ${bmh_namespaces}; do
         [[ "${ns}" == "openshift-machine-api" ]] && continue
+        [[ "${managed_clusters}" == *" ${ns} "* ]] && continue
         collect_ns_resources "${ns}"
         oc get baremetalhosts -n "${ns}" -o yaml > "${BASE_COLLECTION_PATH}/namespaces/${ns}/baremetalhosts.yaml" 2>/dev/null || true
     done
@@ -319,6 +323,7 @@ collect_crds() {
 # ---- Main ----
 log "Starting ORAN O-Cloud must-gather collection"
 log "Output directory: ${BASE_COLLECTION_PATH}"
+[[ -n "${PROVISIONING_REQUESTS}" ]] && log "ProvisioningRequests filter: ${PROVISIONING_REQUESTS}"
 
 collect_cluster_resources
 collect_oran
